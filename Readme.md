@@ -1,11 +1,13 @@
 ### setup
 
+```html
 <script src="index.js"></script>
 <script src="store.js"></script>
-
+```
 
 ### usage
 
+```js
 // Store 인스턴스 생성
 let store = new Store({
     primaryKey: 'id',
@@ -54,6 +56,7 @@ console.log(list)
 // 업데이트
 // store.update(데이터, 조건)
 store.update({ name: 'Charlie' }, { id: 2 })
-
+```
 // 삭제
 store.delete({ id: 1 })
+```
