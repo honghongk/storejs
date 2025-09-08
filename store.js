@@ -44,7 +44,7 @@
 
         // 데이터 몇개 들어있는지 저장, insert + delete -
         count: new WeakMap(),
-        
+
         event: new WeakMap(),
 
         // pk
@@ -196,7 +196,7 @@
 
         /**
          * 데이터 객체 초기화
-         * @param {Array?} v 데이터 객체는 배열만 ㄱㄱ
+         * @param {Array} v 데이터 객체 []
          * @returns {Array}
          */
         data: function(v){
@@ -414,10 +414,11 @@
                 }
 
                 // 연산자 객체일 경우 ({ $gte: 20, $nin: [...] })
+                // FIX: empty 값일때 처리 필요함
                 if (typeof condition === 'object' && condition !== null) {
-                    return Object.entries(condition).every(([op, val]) =>
-                        this._applyOperator(row[key], op, val)
-                    );
+                    return Object.entries(condition).every(([op, val]) => {
+                        return this._applyOperator(row[key], op, val)
+                    });
                 }
 
                 // 단순 값 비교
@@ -447,8 +448,12 @@
             if ( pk && pk._includeKey(where) )
             {
                 isKey = true;
-                target.push(... pk.find(where, list));
-                console.log('####### pk target', target.length);
+                let ff = pk.find(where, list);
+                for (const r of ff)
+                {
+                    let pkv = pk._getKeyValue(r);
+                    target[pkv] = r;
+                }
             }
 
             // k 찾은 값 있으면 결과에 추가
@@ -459,21 +464,30 @@
                     if ( ! key[k]._includeKey(where) )
                         continue;
                     isKey = true;
-                    target.push(... key[k].find(where, list));
+
+                    let ff = key[k].find(where, list);
+                    for (const r of ff)
+                    {
+                        let kv = k._getKeyValue(r);
+                        target[kv] = r;
+                    }
                 }
             }
             // 키 없으면 전체
             if ( ! isKey )
                 target = list;
 
+            let res = {};
             // where 조건에 맞는것 담기
-            let res = [];
-            for (const row of target)
+            for (const k in target)
             {
-                if ( ! this._matchRow(row, where) )
+                let row = target[k];
+                // 없는것도 일단 포함 시키고 select에서 페이징 이후 거르기
+                if ( typeof row == 'undefined' || ! this._matchRow(row, where) )
                     continue;
 
-                res.push(row)
+                let pkv = pk._getKeyValue(row);
+                res[pkv] = row;
             }
 
             return res;
@@ -510,23 +524,13 @@
             let pk = this.primaryKey();
             let key = this.key();
 
-            // 매핑 데이터
-            let pkMap = priv.pkMap.get(this);
-            let keyMap = priv.keyMap.get(this);
-
-            // pk는 중복체크 + 매핑
-            let rowpk = this._getKeyValue(row, pk);
-
-            // update
-            if ( typeof pkMap[rowpk] != 'undefined' )
+            console.log('### set ???')
+            if ( pk.hasMap(row) )
             {
-                let spk = rowpk.split(this.delimiter());
-                let where = {};
-                for (let i = 0; i < pk.length; i++)
-                    where[pk[i]] = spk[i];
-                return this.update(row, where);
+                console.log('set 메서드에서 덮어쓰기 구현 다시 ㄱㄱ');
+                // pk.setMap(row);
+                // this.update(row);
             }
-            // insert
             else
                 return this.insert(row);
         },
@@ -558,14 +562,14 @@
                     throw new Error(`데이터 중복 ㅇㅇ`);
             }
 
+            let pkv = pk._getKeyValue(row);
             let data = this.data();
-            let i = data.push(row);
-            i --;
+            data[pkv] = row;
 
             if ( pk )
-                pk.setMap(row, i);
+                pk.setMap(row, pkv);
             for (const k in key)
-                key[k].setMap(row, i);
+                key[k].setMap(row, pkv);
 
             priv.count.set(this, this.count + 1);
 
@@ -585,29 +589,21 @@
             // await this.api('update')(data, where);
 
             // 키 가져오기
+            let totalData = this.data();
             let pk = this.primaryKey();
             let key = this.key();
-
-            // 키 매핑 가져오기
-            let pkMap = priv.pkMap.get(this);
-            let keyMap = priv.keyMap.get(this);
 
             // 조건에 맞는 값들
             let target = this._getTarget(where);
 
             // pk는 여러개 못바꾸고 하나만 바꿀 수 있음
-            if ( target.length > 1 && this._includeKey(pk, data) )
+            if ( target.length > 1 && pk._includeKey(pk, data) )
                 throw new Error('pk 중복 업데이트');
 
-            let i = -1;
-            let updated = {};
+            let updated = [];
             for (const row of target)
             {
-                i++;
-
-                // 변경전 키 가져오기
-                let oldPK = this._getKeyValue(row, pk);
-                let oldKey = this._getKeyValue(row, key);
+                let copy = structuredClone(row);
 
                 // 변경된것만 수정
                 let upd = {};
@@ -615,44 +611,36 @@
                 {
                     if ( row[k] === data[k] )
                         continue;
-                    row[k] = data[k];
+                    copy[k] = data[k];
                     upd[k] = data[k];
                 }
 
                 // 변경된게 있는거 기록
                 if ( Object.keys(upd).length > 0 )
                 {
-                    updated[i] = upd;
+                    updated.push(upd);
 
-                    // pk가 변경되었으면
-                    if ( this._includeKey(pk, upd) )
+                    // pk 적용
+                    if ( pk._includeKey(upd) )
                     {
-                        let newPK = this._getKeyValue(row, pk);
-
-                        // 유일성 검사
-                        // row가 같지 않고 pk 맵 없으면
-                        if ( target[pkMap[newPK]] !== row && pkMap[newPK] !== undefined )
-                            throw new Error(`이미 존재하는 pk: ${newPK}`);
-
-                        delete pkMap[oldPK];
-                        pkMap[newPK] = i;
+                        pk.delMap(row, totalData.indexOf(row));
+                        pk.setMap(row, totalData.indexOf(copy));
                     }
 
-                    // key가 변경되었으면
-                    if ( this._includeKey(key, upd) )
+                    // 키 적용
+                    for (const kname in key)
                     {
-                        let newKey = this._getKeyValue(row, key);
-
-                        // 기존 키에서 제거
-                        let arr = keyMap[oldKey];
-                        if ( Array.isArray(arr) )
-                            keyMap[oldKey] = arr.filter(idx => idx !== i);
-
-                        // 새 키에 추가
-                        if ( ! Array.isArray(keyMap[newKey]) )
-                            keyMap[newKey] = [];
-                        keyMap[newKey].push(i);
+                        let k = key[kname];
+                        if ( k._includeKey(key, upd) )
+                        {
+                            k.delMap(totalData.indexOf(row));
+                            k.setMap(totalData.indexOf(copy));
+                        }
                     }
+
+                    // 덮어쓰기
+                    for (const k in copy)
+                        row[k] = copy[k];
                 }
             }
 
@@ -678,19 +666,11 @@
             let removed = [];
             let data = this.data();
             let elMap = priv.elementMap.get(this);
-            let pkMap = priv.pkMap.get(this);
-            let keyMap = priv.keyMap.get(this);
             let pk = this.primaryKey();
             let key = this.key();
-            let delim = this.delimiter();
 
-            for (let i = data.length - 1; i >= 0; i--) {
-                let row = data[i];
-
-                // 대상 아닌 것 무시
-                if ( ! target.includes(row) )
-                    continue;
-
+            for (const row of target)
+            {
                 // 렌더된 엘리먼트 제거
                 let el = elMap.get(row);
                 if (el)
@@ -700,26 +680,24 @@
                     elMap.delete(row);
                 }
 
-                // 매핑 삭제
-                if (pk.length > 0)
-                {
-                    const pkKey = pk.map(k => row[k] ?? '').join(delim);
-                    delete pkMap[pkKey];
-                }
+                // pk 적용
+                let pkv = pk._getKeyValue(row);
+                pk.delMap(row, pkv);
 
-                if (key.length > 0)
+                // 키 적용
+                for (const kname in key)
                 {
-                    const keyKey = key.map(k => row[k] ?? '').join(delim);
-                    if (keyMap[keyKey]) {
-                        keyMap[keyKey] = keyMap[keyKey].filter(idx => idx !== i);
-                        if (keyMap[keyKey].length === 0)
-                            delete keyMap[keyKey];
+                    let k = key[kname];
+                    if ( k._includeKey(key, upd) )
+                    {
+                        let kv = k._getKeyValue(row);
+                        k.delMap(row, kv);
                     }
                 }
 
                 // 3. 데이터 제거
-                data.splice(i, 1);
-                removed.push(i);
+                delete data[pkv] ;
+                removed.push(pkv);
             }
 
             // 4. 카운트 갱신
@@ -735,26 +713,24 @@
 
             // 조건에 맞는 값들
             let res = this._getTarget(where);
+            let pk = this.primaryKey();
+            let current = this.data();
 
+            this.selectInfo = {
+                count: res.length,
+            };
+
+            // 조건 맞는 PK 배열
+            let selectedKey = Object.keys(res);
+
+            // 정렬
             if (orderby.length > 0)
             {
-                // 1. 원래 인덱스를 기억하면서 정렬 대상 여부를 체크
-                const withIndex = res.map((item, idx) => ({
-                    idx,
-                    item,
-                    isSortable: (typeof item === 'object' && item !== null)
-                }));
+                selectedKey.sort((ka, kb) => {
+                    const a = res[ka];
+                    const b = res[kb];
 
-                // 2. 정렬 대상과 비대상 분리
-                const sortable = withIndex.filter(v => v.isSortable);
-                const fixed = withIndex.filter(v => !v.isSortable);
-
-                // 3. 정렬 대상만 정렬
-                sortable.sort((ao, bo) => {
-                    const a = ao.item;
-                    const b = bo.item;
-
-                    for ( const o of orderby )
+                    for (const o of orderby)
                     {
                         const col = o.column;
                         const dir = o.type?.toLowerCase() === 'desc' ? -1 : 1;
@@ -762,47 +738,50 @@
                         const va = a[col];
                         const vb = b[col];
 
-                        if ( va === undefined && vb === undefined ) continue;
-                        if ( va === undefined ) return 1 * dir;
-                        if ( vb === undefined ) return -1 * dir;
+                        if (va === undefined && vb === undefined) continue;
+                        if (va === undefined) return 1 * dir;
+                        if (vb === undefined) return -1 * dir;
 
-                        if ( va < vb ) return -1 * dir;
-                        if ( va > vb ) return 1 * dir;
+                        if (va < vb) return -1 * dir;
+                        if (va > vb) return 1 * dir;
                     }
-
                     return 0;
                 });
-
-                // 4. 원래 위치 기준으로 다시 조립
-                const merged = [];
-                let sortableIdx = 0;
-                for ( let i = 0; i < res.length; i++ )
-                {
-                    const fixedItem = fixed.find(v => v.idx === i);
-                    if ( fixedItem )
-                        merged.push(fixedItem.item);
-                    else
-                    {
-                        merged.push(sortable[sortableIdx].item);
-                        sortableIdx++;
-                    }
-                }
-
-                // 결과 반영
-                res = merged;
             }
 
-            // offset, length 적용
+            // 페이징
             if (length > 0)
-                res = res.slice(offset, offset + length);
+                selectedKey = selectedKey.slice(offset, offset + length);
             else if (offset > 0)
-                res = res.slice(offset);
+                selectedKey = selectedKey.slice(offset);
 
-            // 오프셋 빠진거 있다면 가져오기
-            // TODO: 마지막 꺼 감지 해서 호출 안하게하기, 페이징 정보 있어야함
-            if ( res.includes(undefined) || res.length < length )
+            let selected = [];
+            for (const k of selectedKey)
+                selected.push(res[k]);
+            res = selected;
+
+            // 빈공간 확인
+            let needFetch = selectedKey.length < length;
+            // autoincrement 일때만
+            if ( ! needFetch )
             {
-                let current = this.data();
+                let kk = Object.keys(current);
+                let min = Math.min(... kk);
+                let max = Math.max(... kk);
+                for (let i = min; i <= max; i++)
+                {
+                    if ( ! current[i] )
+                    {
+                        needFetch = true;
+                        break;
+                    }
+                }
+            }
+
+            // console.log('호출 감지 ??', res.includes(undefined) || res.length < length,res.includes(undefined) , res.length, length)
+            // 오프셋 빠진거 있다면 가져오기
+            if ( needFetch )
+            {
                 let api = this.api('select');
 
                 let newdata = [];
@@ -810,38 +789,17 @@
                     newdata = await api( ... arguments );
                 else
                     return res;
-                // let newdata = await this.api('select')(...arguments);
 
                 // 일단은 row 각각에 집어넣기 ㄱㄱ
-                let end = offset + length;
-                let i = offset;
                 for (const row of newdata)
                 {
-                    if ( i > end )
-                    {
-                        console.warn('over');
-                        break;
-                    }
-                    row.__offset = i;
-                    current[i] = row;
-                    i++;
+                    let pkv = pk._getKeyValue(row);
+                    current[pkv] = row;
                 }
                 this._remap();
-                
-                // let pk = this.primaryKey();
 
-                // let merge = new Map();
+                this.selectInfo.count = newdata.length;
 
-                // for (const row of current)
-                //     merge.set(row[pk], row);
-
-                // for (const row of newdata)
-                // {
-                //     if (!merge.has(row[pk]))
-                //         merge.set(row[pk], row);
-                // }
-
-                // this.data(Array.from(merge.values()));
                 return newdata;
             }
 
@@ -894,58 +852,62 @@
          * 전체 렌더링
          * 저장된 조건으로 렌더링 하기
          */
-        render: async function(){
-
-            let filter = this.filter();
-            let data = await this.select(filter);
-            let attach = this.attach();
-
-            // 없으면 스킵
-            if ( typeof attach == 'undefined' )
+        render: async function () {
+            // 이미 예약 걸려있으면 스킵
+            if ( this._renderScheduled )
                 return this;
 
-            // 비었을때 템플릿
-            let elMap = priv.elementMap.get(this) ?? new WeakMap();
+            this._renderScheduled = true;
 
-            // FIX: 일단 empty 용의 키로 자기자신
-            let emptyEl = elMap.get(this) ?? [];
+            requestAnimationFrame(async () => {
+                this._renderScheduled = false;
 
-            // 비었을때 element
-            if ( ! elMap.has(this) && attach.empty instanceof Function )
-            {
-                emptyEl = Store.toElement(attach.empty());
-                elMap.set(this, emptyEl);
-                priv.elementMap.set(this, elMap);
-            }
+                let filter = this.filter();
+                let data = await this.select(filter);
+                let attach = this.attach();
 
-            let target = document.querySelector(attach.target);
-            if ( attach.clear )
-                target.innerHTML = '';
+                if ( typeof attach == 'undefined' )
+                    return this;
 
-            // 비었을때 추가
-            if ( data.length == 0 )
-            {
-                for (const el of emptyEl)
-                    target.append(el);
-            }
-            // 있으면 제거
-            else
-            {
-                for (const el of emptyEl)
-                    el.remove();
-            }
+                let elMap = priv.elementMap.get(this) ?? new WeakMap();
+                let emptyEl = elMap.get(this) ?? [];
 
-            // 각 렌더링
-            for (const row of data)
-                this._render(row);
+                if ( ! elMap.has(this) && attach.empty instanceof Function )
+                {
+                    emptyEl = Store.toElement(attach.empty());
+                    elMap.set(this, emptyEl);
+                    priv.elementMap.set(this, elMap);
+                }
+
+                let target = document.querySelector(attach.target);
+                if ( attach.clear )
+                    target.innerHTML = '';
+
+                if ( data.length == 0 )
+                {
+                    for (const el of emptyEl)
+                        target.append(el);
+                }
+                else
+                {
+                    for (const el of emptyEl)
+                        el.remove();
+                }
+
+                for (const k in data)
+                    this._render(data[k]);
+
+                return this;
+            });
+
             return this;
-        },
+        }
     };
     let alias = {};
     let statics = {
         default: {
             key: {},
-            data: [],
+            data: {},
             filter: {},
             api: {},
         },
@@ -1080,9 +1042,9 @@
                             if ( ! ( p in setup && args.length === 0 ) )
                             {
                                 // 렌더 순서맞추기 용
-                                if ( typeof res?.then === 'function' )
-                                    res.then( () => this.render() );
-                                else
+                                // if ( typeof res?.then === 'function' )
+                                //     res.then( () => this.render() );
+                                // else
                                     this.render();
                             }
                         }
