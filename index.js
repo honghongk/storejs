@@ -161,6 +161,13 @@
                 for (let i = 0; i < data.length; i++)
                 {
                     const row = data[i];
+
+                    if ( typeof row == 'undefined' )
+                    {
+                        throw '없는 row hash.remap'
+                        return false;
+                    }
+
                     let rowk = this._getKeyValue(row);
 
                     if ( uniq )
@@ -186,6 +193,13 @@
              * @returns 
              */
             hasMap: function(row) {
+
+                if ( typeof row == 'undefined' )
+                {
+                    throw '없는 row hash.hasMap'
+                    return false;
+                }
+
                 let map = this.map();
                 let key = this._getKeyValue(row);
                 return typeof map[key] != 'undefined';
@@ -194,19 +208,26 @@
             /**
              * 매핑 데이터 세팅
              * @param {*} row row 데이터
-             * @param {*} i 입력된 오프셋
+             * @param {*} k row에 대한 키
              */
-            setMap: function(row, i){
+            setMap: function(row, k){
+
+                if ( typeof row == 'undefined' )
+                {
+                    throw '없는 row hash.setMap'
+                    return false;
+                }
+
                 let key = this._getKeyValue(row);
                 let map = this.map();
 
                 if ( this.unique() )
-                    map[key] = i;
+                    map[key] = k;
                 else
                 {
                     if ( ! Array.isArray(map[key] ) )
                         map[key] = [];
-                    map[key].push(i);
+                    map[key].push(k);
                 }
             },
             /**
@@ -215,6 +236,13 @@
              * @param {*} i 입력된 오프셋
              */
             delMap: function(row, i){
+
+                if ( typeof row == 'undefined' )
+                {
+                    throw '없는 row hash.delMap'
+                    return false;
+                }
+
                 let key = this._getKeyValue(row);
                 let map = this.map();
 
@@ -262,8 +290,6 @@
 
                     for (let col of column)
                     {
-                        // 테스트용
-                        this._loop++;
                         if (!cond[col])
                             continue;
 
@@ -292,6 +318,9 @@
                 for (let i = 0; i < data.length; i++)
                 {
                     const row = data[i];
+                    if ( typeof row == 'undefined' )
+                        continue;
+
                     let rowk = this._getKeyValue(row);
 
                     // 삽입 위치 찾기
@@ -319,6 +348,12 @@
              * @returns 
              */
             hasMap: function(row) {
+
+                if ( typeof row == 'undefined' )
+                {
+                    throw '없는 row bins.hasMap'
+                    return false;
+                }
                 let map = this.map();
                 let key = this._getKeyValue(row);
                 return map.includes(key); // 배열에 key 존재 여부
@@ -327,9 +362,16 @@
             /**
              * 매핑 데이터 세팅
              * @param {*} row row 데이터
-             * @param {*} i 입력된 오프셋
+             * @param {*} k row에 대한 키
              */
-            setMap: function(row, i){
+            setMap: function(row, k){
+
+                if ( typeof row == 'undefined' )
+                {
+                    throw '없는 row bins.setMap'
+                    return false;
+                }
+                
                 let key = this._getKeyValue(row);
                 let map = this.map();
 
@@ -344,7 +386,7 @@
                         left = mid + 1;
                 }
 
-                map.splice(left, 0, i);
+                map.splice(left, 0, k);
             },
 
             /**
@@ -478,8 +520,9 @@
          * 키에 맞는 데이터들 빼오기
          *  TODO: 지금 값이 문자로 리턴해서 숫자 정렬이 안맞음
          *  복합키에서 해시는 이대로 괜찮고, 이진탐색은 pad 넣어야좋을듯?
+         * 
+         * TODO: empty 값 처리 필요함, store 에서 아직 안가져온 값은 empty임
          * @param {*} row 
-         * @param {*} field 
          * @returns 인덱스 매핑용 value
          */
         _getKeyValue: function(row){
@@ -502,28 +545,27 @@
         /**
          * 매핑 데이터 추가
          * @param {*} row 
+         * @param {*} k row에 대한 키
          */
-        setMap: function(row, i){
+        setMap: function(row, k){
             let type = this.type();
-            return stratege[type].setMap.call(this, row, i);
+            return stratege[type].setMap.call(this, row, k);
         },
 
         /**
          * 매핑 데이터 제거
          * @param {*} row 
+         * @param {*} k row에 대한 키
          */
-        delMap: function(row, i){
+        delMap: function(row, k){
             let type = this.type();
-            return stratege[type].delMap.call(this, row, i);
+            return stratege[type].delMap.call(this, row, k);
         },
 
         /**
          * 키로 매핑 데이터 찾기
          */
         find: function(where, data){
-
-            // 테스트용
-            this._loop = 0;
 
             if ( ! this._includeKey(where) )
                 return [];
@@ -543,13 +585,9 @@
             if ( ! data || data.length == 0 )
                 return this;
 
-            console.time('index remap');
-
             let type = this.type();
             let newmap =  stratege[type].remap.call(this, data);
             this.map(newmap);
-
-            console.timeEnd('index remap');
 
             return this;
         },
