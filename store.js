@@ -408,6 +408,14 @@
                     return ! this._matchRow(row, condition);
                 }
 
+                // 논리연산자 없으면 $eq $like 취급으로
+                if ( typeof condition !== 'object' && condition !== null )
+                {
+                    condition = condition.includes('%')
+                        ? { $like: condition }
+                        : { $eq: condition } ;
+                }
+
                 // 값이 함수일 경우
                 if (typeof condition === 'function') {
                     return condition(row[key]);
@@ -468,7 +476,7 @@
                     let ff = key[k].find(where, list);
                     for (const r of ff)
                     {
-                        let kv = k._getKeyValue(r);
+                        let kv = key[k]._getKeyValue(r);
                         target[kv] = r;
                     }
                 }
@@ -573,7 +581,7 @@
 
             priv.count.set(this, this.count + 1);
 
-            return i;
+            return pkv;
         },
 
         /**
@@ -601,8 +609,9 @@
                 throw new Error('pk 중복 업데이트');
 
             let updated = [];
-            for (const row of target)
+            for (const k in target)
             {
+                let row = target[k];
                 let copy = structuredClone(row);
 
                 // 변경된것만 수정
@@ -669,8 +678,9 @@
             let pk = this.primaryKey();
             let key = this.key();
 
-            for (const row of target)
+            for (const k in target)
             {
+                let row = target[k];
                 // 렌더된 엘리먼트 제거
                 let el = elMap.get(row);
                 if (el)
@@ -859,44 +869,48 @@
 
             this._renderScheduled = true;
 
-            requestAnimationFrame(async () => {
-                this._renderScheduled = false;
+            requestAnimationFrame(() => {
+                // TODO: settimeout 이거 말고 없을란가? 완전 동기적으로 돌게끔?
+                setTimeout(async () => {
 
-                let filter = this.filter();
-                let data = await this.select(filter);
-                let attach = this.attach();
-
-                if ( typeof attach == 'undefined' )
-                    return this;
-
-                let elMap = priv.elementMap.get(this) ?? new WeakMap();
-                let emptyEl = elMap.get(this) ?? [];
-
-                if ( ! elMap.has(this) && attach.empty instanceof Function )
-                {
-                    emptyEl = Store.toElement(attach.empty());
-                    elMap.set(this, emptyEl);
-                    priv.elementMap.set(this, elMap);
-                }
-
-                let target = document.querySelector(attach.target);
-                if ( attach.clear )
-                    target.innerHTML = '';
-
-                if ( data.length == 0 )
-                {
-                    for (const el of emptyEl)
-                        target.append(el);
-                }
-                else
-                {
-                    for (const el of emptyEl)
-                        el.remove();
-                }
-
-                for (const k in data)
-                    this._render(data[k]);
-
+                    this._renderScheduled = false;
+    
+                    let filter = this.filter();
+                    let data = await this.select(filter);
+                    let attach = this.attach();
+    
+                    if ( typeof attach == 'undefined' )
+                        return this;
+    
+                    let elMap = priv.elementMap.get(this) ?? new WeakMap();
+                    let emptyEl = elMap.get(this) ?? [];
+    
+                    if ( ! elMap.has(this) && attach.empty instanceof Function )
+                    {
+                        emptyEl = Store.toElement(attach.empty());
+                        elMap.set(this, emptyEl);
+                        priv.elementMap.set(this, elMap);
+                    }
+    
+                    let target = document.querySelector(attach.target);
+                    if ( attach.clear )
+                        target.innerHTML = '';
+    
+                    if ( data.length == 0 )
+                    {
+                        for (const el of emptyEl)
+                            target.append(el);
+                    }
+                    else
+                    {
+                        for (const el of emptyEl)
+                            el.remove();
+                    }
+    
+                    for (const k in data)
+                        this._render(data[k]);
+    
+                }, 30);
                 return this;
             });
 
